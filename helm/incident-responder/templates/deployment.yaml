@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-incident-responder
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-incident-responder
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-incident-responder
+    spec:
+      serviceAccountName: {{ .Release.Name }}-incident-responder
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PAGERDUTY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: pagerduty-token
+            - name: PAGERDUTY_FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: pagerduty-from-email
+            - name: PAGERDUTY_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: pagerduty-webhook-secret
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheusUrl | quote }}
+            - name: LOKI_URL
+              value: {{ .Values.lokiUrl | quote }}
+            - name: VLLM_BASE_URL
+              value: {{ .Values.vllmBaseUrl | quote }}
+            - name: VLLM_MODEL
+              value: {{ .Values.vllmModel | quote }}
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: vllm-api-key
+                  optional: true
+            - name: HTTP_TIMEOUT_SECONDS
+              value: {{ .Values.httpTimeoutSeconds | quote }}
+            - name: LOOKBACK_MINUTES
+              value: {{ .Values.lookbackMinutes | quote }}
+            - name: MAX_ATTEMPTS
+              value: {{ .Values.maxAttempts | quote }}
+            - name: DATABASE_PATH
+              value: /data/jobs.db
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-incident-responder

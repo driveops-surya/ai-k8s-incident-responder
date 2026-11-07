@@ -1,0 +1,22 @@
+image:
+  repository: incident-responder
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+secretName: incident-responder-secrets
+prometheusUrl: http://prometheus:9090
+lokiUrl: http://loki:3100
+vllmBaseUrl: http://vllm:8000/v1
+vllmModel: replace-with-model-name
+httpTimeoutSeconds: 20
+lookbackMinutes: 30
+maxAttempts: 5
+persistence:
+  size: 1Gi
+  storageClassName: ""
+service:
+  port: 80
+ingress:
+  enabled: false
+  className: ""
+  host: incident-responder.example.com
+  tlsSecretName: ""

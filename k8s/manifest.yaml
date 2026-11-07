@@ -1,0 +1,152 @@
+﻿---
+# Source: incident-responder/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: incident-responder-incident-responder
+---
+# Source: incident-responder/templates/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: incident-responder-incident-responder
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: "1Gi"
+---
+# Source: incident-responder/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: incident-responder-incident-responder
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["list"]
+---
+# Source: incident-responder/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: incident-responder-incident-responder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: incident-responder-incident-responder
+subjects:
+  - kind: ServiceAccount
+    name: incident-responder-incident-responder
+    namespace: default
+---
+# Source: incident-responder/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-responder-incident-responder
+spec:
+  selector:
+    app: incident-responder-incident-responder
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+# Source: incident-responder/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-responder-incident-responder
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: incident-responder-incident-responder
+  template:
+    metadata:
+      labels:
+        app: incident-responder-incident-responder
+    spec:
+      serviceAccountName: incident-responder-incident-responder
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: app
+          image: "incident-responder:0.1.0"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PAGERDUTY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: incident-responder-secrets
+                  key: pagerduty-token
+            - name: PAGERDUTY_FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: incident-responder-secrets
+                  key: pagerduty-from-email
+            - name: PAGERDUTY_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: incident-responder-secrets
+                  key: pagerduty-webhook-secret
+            - name: PROMETHEUS_URL
+              value: "http://prometheus:9090"
+            - name: LOKI_URL
+              value: "http://loki:3100"
+            - name: VLLM_BASE_URL
+              value: "http://vllm:8000/v1"
+            - name: VLLM_MODEL
+              value: "replace-with-model-name"
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: incident-responder-secrets
+                  key: vllm-api-key
+                  optional: true
+            - name: HTTP_TIMEOUT_SECONDS
+              value: "20"
+            - name: LOOKBACK_MINUTES
+              value: "30"
+            - name: MAX_ATTEMPTS
+              value: "5"
+            - name: DATABASE_PATH
+              value: /data/jobs.db
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: incident-responder-incident-responder

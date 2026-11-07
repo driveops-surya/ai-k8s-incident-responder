@@ -1,0 +1,38 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: incident-demo
+  region: ap-south-1
+  version: "1.34"
+
+availabilityZones:
+  - ap-south-1a
+  - ap-south-1b
+
+vpc:
+  cidr: 10.42.0.0/16
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+  # Documentation-only placeholder: replace with your trusted public IP /32.
+  publicAccessCIDRs:
+    - 192.0.2.1/32
+  nat:
+    gateway: Disable
+
+iam:
+  withOIDC: true
+
+managedNodeGroups:
+  - name: cpu-workers
+    instanceType: t3.large
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 2
+    privateNetworking: false
+    disablePodIMDS: true
+    volumeType: gp3
+    volumeSize: 30
+    ssh:
+      allow: false

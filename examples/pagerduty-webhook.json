@@ -1,0 +1,12 @@
+{
+  "event": {
+    "id": "01EXAMPLEEVENTID",
+    "event_type": "incident.triggered",
+    "resource_type": "incident",
+    "data": {
+      "id": "P123ABC",
+      "type": "incident",
+      "title": "Pod crash looping"
+    }
+  }
+}

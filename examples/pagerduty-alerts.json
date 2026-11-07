@@ -1,0 +1,17 @@
+{
+  "alerts": [
+    {
+      "id": "Q123ABC",
+      "summary": "Pod crash looping",
+      "body": {
+        "type": "alert_body",
+        "details": {
+          "namespace": "production",
+          "pod": "checkout-7f88886d8d-abcde",
+          "alertname": "KubePodCrashLooping"
+        }
+      }
+    }
+  ],
+  "more": false
+}

@@ -1,0 +1,16 @@
+route:
+  receiver: pagerduty
+  group_by: [alertname, namespace, pod]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: pagerduty
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
+        send_resolved: true
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          namespace: '{{ .CommonLabels.namespace }}'
+          pod: '{{ .CommonLabels.pod }}'
+          alertname: '{{ .CommonLabels.alertname }}'

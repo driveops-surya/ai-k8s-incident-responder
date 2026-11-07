@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-incident-responder
+spec:
+  selector:
+    app: {{ .Release.Name }}-incident-responder
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 8000
