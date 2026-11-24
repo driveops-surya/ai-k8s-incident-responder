@@ -5,9 +5,26 @@ image:
 secretName: incident-responder-secrets
 prometheusUrl: http://prometheus:9090
 lokiUrl: http://loki:3100
-vllmBaseUrl: http://vllm:8000/v1
-vllmModel: replace-with-model-name
+# Empty uses the in-cluster Ollama below; set it to use another endpoint.
+vllmBaseUrl: ""
+vllmModel: llama3.2
 httpTimeoutSeconds: 20
+# CPU inference on small nodes is slow.
+vllmTimeoutSeconds: 600
+# Sized for the Ollama context length below; raise both together.
+maxEvidenceChars: "6000"
+ollama:
+  enabled: true
+  image: ollama/ollama:0.40.17
+  contextLength: 4096
+  storageSize: 10Gi
+  nodeSelector: {}
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      memory: 5Gi
 lookbackMinutes: 30
 maxAttempts: 5
 persistence:

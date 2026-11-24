@@ -193,3 +193,38 @@ def test_large_evidence_is_bounded_and_reported(configured, monkeypatch):
     assert captured["evidence"]["kubernetes"]["truncated"]
     assert captured["evidence"]["loki"] == ["important log"]
     assert "kubernetes evidence truncated" in captured["note"]
+
+
+def test_small_model_budget_keeps_every_source():
+    from app.pipeline import fit_evidence
+
+    evidence = {
+        "incident": {"id": "P1"},
+        "alert_summaries": [{"summary": "crash"}],
+        "kubernetes": {"events": ['quoted "event"' * 1000]},
+        "prometheus": {"cpu": 1},
+        "loki": ["log line" * 1000],
+        "collection_warnings": [],
+    }
+    fit_evidence(evidence, 6000)
+    assert len(json.dumps(evidence)) <= 6000
+    assert evidence["prometheus"] == {"cpu": 1}
+    assert evidence["kubernetes"]["preview"] and evidence["loki"]["preview"]
+    assert len(evidence["collection_warnings"]) == 2
+
+
+def test_model_request_uses_model_timeout(configured, monkeypatch):
+    from app import vllm
+
+    monkeypatch.setenv("VLLM_TIMEOUT_SECONDS", "240")
+    seen = {}
+
+    def post(url, **kwargs):
+        seen.update(kwargs)
+        body = {"choices": [{"message": {"content": "ok"}}]}
+        return httpx.Response(200, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", post)
+    with TestClient(app):
+        assert vllm.analyze(app.state.settings, {}) == "ok"
+    assert seen["timeout"] == 240

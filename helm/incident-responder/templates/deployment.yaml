@@ -50,7 +50,13 @@ spec:
             - name: LOKI_URL
               value: {{ .Values.lokiUrl | quote }}
             - name: VLLM_BASE_URL
+              {{- if .Values.vllmBaseUrl }}
               value: {{ .Values.vllmBaseUrl | quote }}
+              {{- else if .Values.ollama.enabled }}
+              value: "http://{{ .Release.Name }}-ollama:11434/v1"
+              {{- else }}
+              {{- fail "Set vllmBaseUrl when ollama.enabled is false" }}
+              {{- end }}
             - name: VLLM_MODEL
               value: {{ .Values.vllmModel | quote }}
             - name: VLLM_API_KEY
@@ -59,6 +65,10 @@ spec:
                   name: {{ .Values.secretName }}
                   key: vllm-api-key
                   optional: true
+            - name: VLLM_TIMEOUT_SECONDS
+              value: {{ .Values.vllmTimeoutSeconds | quote }}
+            - name: MAX_EVIDENCE_CHARS
+              value: {{ .Values.maxEvidenceChars | quote }}
             - name: HTTP_TIMEOUT_SECONDS
               value: {{ .Values.httpTimeoutSeconds | quote }}
             - name: LOOKBACK_MINUTES

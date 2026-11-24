@@ -8,8 +8,8 @@ def analyze(settings, evidence):
     if settings.vllm_api_key:
         headers["Authorization"] = f"Bearer {settings.vllm_api_key}"
     serialized = json.dumps(evidence, default=str, ensure_ascii=True)
-    if len(serialized) > 60000:
-        serialized = serialized[:60000] + "\n[Evidence truncated]"
+    if len(serialized) > settings.max_evidence_chars:
+        serialized = serialized[:settings.max_evidence_chars] + "\n[Evidence truncated]"
     response = httpx.post(
         f"{settings.vllm_base_url}/chat/completions",
         headers=headers,
@@ -31,10 +31,10 @@ def analyze(settings, evidence):
                 {"role": "user", "content": f"Analyze this incident evidence:\n{serialized}"},
             ],
         },
-        timeout=settings.http_timeout,
+        timeout=settings.vllm_timeout,
     )
     response.raise_for_status()
     content = response.json()["choices"][0]["message"]["content"]
     if not isinstance(content, str) or not content.strip():
-        raise ValueError("vLLM returned an empty analysis")
+        raise ValueError("Model returned an empty analysis")
     return content.strip()

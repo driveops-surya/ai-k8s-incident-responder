@@ -12,6 +12,8 @@ class Settings:
     vllm_base_url: str
     vllm_model: str
     vllm_api_key: str
+    vllm_timeout: float
+    max_evidence_chars: int
     pagerduty_api_url: str
     database_path: str
     http_timeout: float
@@ -27,10 +29,14 @@ class Settings:
             return value
 
         timeout = float(os.getenv("HTTP_TIMEOUT_SECONDS", "20"))
+        vllm_timeout = float(os.getenv("VLLM_TIMEOUT_SECONDS", "180"))
+        evidence_chars = int(os.getenv("MAX_EVIDENCE_CHARS", "60000"))
         lookback = int(os.getenv("LOOKBACK_MINUTES", "30"))
         attempts = int(os.getenv("MAX_ATTEMPTS", "5"))
-        if timeout <= 0 or lookback <= 0 or attempts <= 0:
-            raise ValueError("Timeout, lookback, and max attempts must be positive")
+        if timeout <= 0 or vllm_timeout <= 0 or lookback <= 0 or attempts <= 0:
+            raise ValueError("Timeouts, lookback, and max attempts must be positive")
+        if evidence_chars < 2000:
+            raise ValueError("MAX_EVIDENCE_CHARS must be at least 2000")
         return cls(
             pagerduty_token=required("PAGERDUTY_API_TOKEN"),
             pagerduty_from_email=required("PAGERDUTY_FROM_EMAIL"),
@@ -40,6 +46,8 @@ class Settings:
             vllm_base_url=required("VLLM_BASE_URL").rstrip("/"),
             vllm_model=required("VLLM_MODEL"),
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
+            vllm_timeout=vllm_timeout,
+            max_evidence_chars=evidence_chars,
             pagerduty_api_url=os.getenv("PAGERDUTY_API_URL", "https://api.pagerduty.com").rstrip("/"),
             database_path=os.getenv("DATABASE_PATH", "./data/jobs.db"),
             http_timeout=timeout,

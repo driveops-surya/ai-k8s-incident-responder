@@ -8,6 +8,24 @@ from app.scope import incident_scope
 logger = logging.getLogger(__name__)
 
 
+def fit_evidence(evidence, max_chars):
+    """Share the model's input budget across sources, so one cannot crowd out the rest."""
+    sections = {
+        name: json.dumps(evidence[name], default=str, ensure_ascii=True)
+        for name in ("incident", "alert_summaries", "kubernetes", "prometheus", "loki")
+        if name in evidence
+    }
+    # Reserve a quarter for scope, warnings, and JSON escaping of previews.
+    remaining = max_chars * 3 // 4
+    # Smallest first: whatever a small section leaves unused goes to the larger ones.
+    for position, (name, serialized) in enumerate(sorted(sections.items(), key=lambda item: len(item[1]))):
+        allowance = min(8000, remaining // (len(sections) - position))
+        if len(serialized) > allowance:
+            evidence[name] = {"truncated": True, "preview": serialized[:allowance]}
+            evidence["collection_warnings"].append(f"{name} evidence truncated for model input.")
+        remaining -= min(len(serialized), allowance)
+
+
 def process(settings, event):
     incident = event["data"]
     incident_id = incident["id"]
@@ -42,12 +60,7 @@ def process(settings, event):
             except Exception:
                 logger.exception("Evidence collection failed for %s", name)
                 evidence["collection_warnings"].append(f"{name} collection failed; inspect service logs.")
-    for name in ("incident", "alert_summaries", "kubernetes", "prometheus", "loki"):
-        if name in evidence:
-            serialized = json.dumps(evidence[name], default=str, ensure_ascii=True)
-            if len(serialized) > 8000:
-                evidence[name] = {"truncated": True, "preview": serialized[:8000]}
-                evidence["collection_warnings"].append(f"{name} evidence truncated for model input.")
+    fit_evidence(evidence, settings.max_evidence_chars)
     analysis = vllm.analyze(settings, evidence)
     warnings = "\n".join(f"- {warning}" for warning in evidence["collection_warnings"]) or "- None"
     note = (

@@ -36,7 +36,7 @@ flowchart TB
         Work["Demo workloads<br/>and application logs"]
         API["Incident responder<br/>FastAPI + worker"]
         Queue[("Persistent queue<br/>SQLite on EBS")]
-        VLLM["vLLM service<br/>GPU node group"]
+        LLM["Ollama service<br/>Open model on CPU nodes"]
       end
       EBS[("Amazon EBS<br/>Persistent volumes")]
     end
@@ -55,14 +55,14 @@ flowchart TB
   API -->|"read-only API"| EKS
   API -->|"PromQL"| Prom
   API -->|"LogQL"| Loki
-  API -->|"chat completions"| VLLM
+  API -->|"chat completions"| LLM
   API -->|"incident alerts + note"| PD
   SRE -->|"review and decide"| PD
   SRE -.->|"private access / port-forward"| Graf
   Graf -->|"queries"| Prom
   Graf -->|"queries"| Loki
   ECR -.->|"pull application image"| API
-  Model -.->|"download model weights"| VLLM
+  Model -.->|"download model weights"| LLM
 ```
 
 The HTTPS ingress requires an ingress controller, a public DNS name and a
@@ -104,12 +104,12 @@ installations; cluster identity is not inferred from alert labels.
 3. Build and test the responder image, create an ECR repository and push it.
 4. Install Prometheus, Grafana, Loki and Alloy; validate metrics and logs.
 5. Configure PagerDuty, Alertmanager and the authenticated HTTPS webhook.
-6. Provision a GPU node group and deploy vLLM with a suitable model.
+6. Choose the model: the bundled CPU Ollama, or vLLM on a GPU node group.
 7. Configure and deploy the responder with Helm; validate all connections.
 8. Trigger controlled incidents and verify the full path; document cleanup.
 
 The order may be adjusted after checking quotas, budget and the chosen
-PagerDuty plan. In particular, the GPU node group should exist only while
+PagerDuty plan. If you use a GPU node group, it should exist only while
 needed for the demonstration. AWS resources incur charges, including the EKS
 control plane even with zero worker nodes. Deleting a node group is not the
 same as deleting the cluster; volumes, load balancers, addresses and image
@@ -124,8 +124,8 @@ secret management, and monitoring of the incident platform itself.
 public API endpoints. Its public API allowlist contains a documentation-only
 IP address. **Do not create a cluster with this placeholder:** replace it with
 a trusted current public IPv4 `/32` and verify your access before deployment.
-The config does not deploy GPU nodes, the EBS CSI driver, an ingress controller,
-monitoring, or vLLM; those require later stages and additional IAM and costs.
+The config installs the EBS CSI driver, but no GPU nodes, ingress controller,
+monitoring, or model; those require later stages and additional IAM and costs.
 
 Kubernetes 1.34 was chosen for this temporary example to match the currently
 installed kubectl 1.33 client within the supported one-minor version skew.
@@ -194,8 +194,10 @@ All settings are environment variables; never commit secrets.
 | `VLLM_MODEL` | Model name exposed by vLLM |
 | `VLLM_API_KEY` | Optional API key for a secured vLLM endpoint |
 | `PAGERDUTY_API_URL` | Optional REST base URL; defaults to `https://api.pagerduty.com` |
+| `VLLM_TIMEOUT_SECONDS` | Model request timeout, defaults to 180 |
+| `MAX_EVIDENCE_CHARS` | Evidence sent to the model, defaults to 60000 (minimum 2000) |
 | `DATABASE_PATH` | SQLite file, defaults to `./data/jobs.db` |
-| `HTTP_TIMEOUT_SECONDS` | Per-request timeout, defaults to 20 |
+| `HTTP_TIMEOUT_SECONDS` | Timeout for non-model requests, defaults to 20 |
 | `LOOKBACK_MINUTES` | Evidence window, defaults to 30 |
 | `MAX_ATTEMPTS` | Maximum job attempts, defaults to 5 |
 
@@ -206,6 +208,17 @@ If there is no unambiguous scope, the service avoids broad cluster/log queries
 and explicitly reports missing context. Alerts without a pod still get
 namespace-level Kubernetes evidence. Verify the actual incident alert details
 in your PagerDuty integration before production use.
+
+### Using Ollama as the model
+
+The `VLLM_*` settings accept any OpenAI-compatible chat endpoint. To use Ollama
+on the machine running the responder, run `ollama pull llama3.2` and set
+`VLLM_BASE_URL=http://localhost:11434/v1` and `VLLM_MODEL=llama3.2`.
+
+Ollama silently drops input beyond its context window (often 4096 tokens), so
+keep `MAX_EVIDENCE_CHARS=6000` unless you raise `OLLAMA_CONTEXT_LENGTH`. CPU
+inference can take a minute or more. In EKS, the Helm chart deploys its own
+Ollama; see below.
 
 ## Kubernetes and Helm
 
@@ -228,8 +241,33 @@ Edit the chart values for service URLs, model, persistence and ingress before
 installing. The chart provides read-only cluster RBAC, a persistent volume,
 and optional ingress. `k8s/` contains a plain-manifest alternative; edit its
 image, URLs and secret references before `kubectl apply -f k8s/`.
-Provision vLLM separately on GPU-enabled nodes; neither deployment installs a
-GPU driver, model, Prometheus, Loki, or PagerDuty.
+Neither deployment installs Prometheus, Loki, or PagerDuty.
+
+### In-cluster model
+
+By default the chart and plain manifest deploy Ollama, download `llama3.2` (about
+2 GB) to a persistent volume on first start, and point the responder at it. The
+Ollama pod requests 1 CPU and 4 GiB of memory, so nodes need that free and
+outbound access to Docker Hub and `registry.ollama.ai`. Evidence stays in the
+cluster.
+
+EKS 1.30 and later has no default StorageClass, so name one; `gp2` works with the
+EBS CSI driver. The plain manifest omits it: set `storageClassName` on both PVCs,
+or mark a class as default, before applying.
+
+```sh
+helm upgrade --install incident-responder ./helm/incident-responder \
+  --set image.repository=YOUR_REGISTRY/incident-responder \
+  --set image.tag=TAG \
+  --set persistence.storageClassName=gp2
+kubectl rollout status deployment/incident-responder-ollama --timeout=15m
+```
+
+Change the model with `vllmModel`, raising `ollama.resources` and
+`ollama.storageSize` to match. To use another endpoint, set
+`ollama.enabled=false` and `vllmBaseUrl`. Ollama has no authentication: it is
+ClusterIP only, with a NetworkPolicy admitting just the responder. Enable
+network policy support in the VPC CNI for that policy to be enforced.
 
 ## Testing
 

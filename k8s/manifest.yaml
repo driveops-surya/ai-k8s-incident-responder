@@ -1,9 +1,40 @@
-﻿---
+---
+# Source: incident-responder/templates/ollama.yaml
+# Ollama has no authentication: allow only the responder. This is enforced only
+# when the cluster's CNI has network policy support enabled.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: incident-responder-ollama
+spec:
+  podSelector:
+    matchLabels:
+      app: incident-responder-ollama
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: incident-responder-incident-responder
+      ports:
+        - port: 11434
+---
 # Source: incident-responder/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: incident-responder-incident-responder
+---
+# Source: incident-responder/templates/ollama.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: incident-responder-ollama
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: "10Gi"
 ---
 # Source: incident-responder/templates/pvc.yaml
 apiVersion: v1
@@ -45,6 +76,18 @@ subjects:
   - kind: ServiceAccount
     name: incident-responder-incident-responder
     namespace: default
+---
+# Source: incident-responder/templates/ollama.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-responder-ollama
+spec:
+  selector:
+    app: incident-responder-ollama
+  ports:
+    - port: 11434
+      targetPort: 11434
 ---
 # Source: incident-responder/templates/service.yaml
 apiVersion: v1
@@ -111,15 +154,19 @@ spec:
             - name: LOKI_URL
               value: "http://loki:3100"
             - name: VLLM_BASE_URL
-              value: "http://vllm:8000/v1"
+              value: "http://incident-responder-ollama:11434/v1"
             - name: VLLM_MODEL
-              value: "replace-with-model-name"
+              value: "llama3.2"
             - name: VLLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: incident-responder-secrets
                   key: vllm-api-key
                   optional: true
+            - name: VLLM_TIMEOUT_SECONDS
+              value: "600"
+            - name: MAX_EVIDENCE_CHARS
+              value: "6000"
             - name: HTTP_TIMEOUT_SECONDS
               value: "20"
             - name: LOOKBACK_MINUTES
@@ -150,3 +197,104 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: incident-responder-incident-responder
+---
+# Source: incident-responder/templates/ollama.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-responder-ollama
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: incident-responder-ollama
+  template:
+    metadata:
+      labels:
+        app: incident-responder-ollama
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # Download the model once; later restarts reuse the volume.
+        - name: pull-model
+          image: "ollama/ollama:0.40.17"
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              ollama serve &
+              until ollama list >/dev/null 2>&1; do sleep 1; done
+              ollama show "$MODEL" >/dev/null 2>&1 || ollama pull "$MODEL"
+          env:
+            - name: MODEL
+              value: "llama3.2"
+            - name: HOME
+              value: /models
+            - name: OLLAMA_MODELS
+              value: /models
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            limits:
+              memory: 5Gi
+            requests:
+              cpu: "1"
+              memory: 4Gi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      containers:
+        - name: ollama
+          image: "ollama/ollama:0.40.17"
+          ports:
+            - containerPort: 11434
+          env:
+            - name: OLLAMA_HOST
+              value: 0.0.0.0:11434
+            - name: HOME
+              value: /models
+            - name: OLLAMA_MODELS
+              value: /models
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "4096"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_KEEP_ALIVE
+              value: "-1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            limits:
+              memory: 5Gi
+            requests:
+              cpu: "1"
+              memory: 4Gi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: incident-responder-ollama
